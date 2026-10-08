@@ -21,6 +21,14 @@ public:
     // Override filament sync (Qidi-specific implementation)
     bool fetch_filament_info(std::string dev_id) override;
 
+    // Build the Klipper commands that point T<n> at the Box slot chosen in the print dialog.
+    // Public and static so it can be unit-tested without a printer.
+    static std::string build_slot_mapping_gcode(const std::string& ams_mapping2, const std::string& ams_mapping);
+
+protected:
+    // Push the print dialog's filament -> QIDI Box slot mapping to the printer
+    bool prepare_print(const PrintParams& params, std::string& error) override;
+
 private:
     struct QidiFilamentDict
     {

@@ -369,6 +369,15 @@ int MoonrakerPrinterAgent::start_local_print(PrintParams params, OnUpdateStatusF
         return BAMBU_NETWORK_ERR_CANCELED;
     }
 
+    // Let the vendor agent push per-job settings (e.g. filament slot mapping) before starting
+    {
+        std::string prepare_error;
+        if (!prepare_print(params, prepare_error)) {
+            BOOST_LOG_TRIVIAL(error) << "MoonrakerPrinterAgent: prepare_print failed: " << prepare_error;
+            return BAMBU_NETWORK_ERR_PRINT_LP_PUBLISH_MSG_FAILED;
+        }
+    }
+
     // Start print via gcode script (simpler than JSON-RPC)
     if (update_fn)
         update_fn(PrintingStageSending, 0, "Starting print...");

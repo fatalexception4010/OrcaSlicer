@@ -108,6 +108,13 @@ protected:
     // State access for derived classes
     mutable std::recursive_mutex       state_mutex;
 
+    // Runs after the G-code is uploaded and before the print is started.
+    // Vendor agents can push per-job settings here (e.g. filament slot mapping).
+    // Returning false aborts the print.
+    virtual bool prepare_print(const PrintParams& params, std::string& error) { (void) params; (void) error; return true; }
+
+    bool send_gcode(const std::string& dev_id, const std::string& gcode) const;
+
     // Helpers
     bool        is_numeric(const std::string& value);
     std::string normalize_base_url(std::string host, const std::string& port);
@@ -127,7 +134,6 @@ private:
 
     bool fetch_object_list(const std::string& base_url, const std::string& api_key, std::set<std::string>& objects, std::string& error) const;
     bool query_printer_status(const std::string& base_url, const std::string& api_key, nlohmann::json& status, std::string& error) const;
-    bool send_gcode(const std::string& dev_id, const std::string& gcode) const;
 
     void announce_printhost_device();
     void dispatch_local_connect(int state, const std::string& dev_id, const std::string& msg);

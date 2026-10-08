@@ -74,6 +74,70 @@ bool QidiPrinterAgent::fetch_filament_info(std::string dev_id)
     return true;
 }
 
+// QIDI firmware does not take the Box slot from the G-code. Each tool macro T<n>
+// loads the slot stored in the saved variable value_t<n> (config/box1.cfg on the
+// printer), and the printer's screen software rewrites those variables, e.g. after
+// a filament runout. QIDI Studio therefore writes value_t<n> from its print-dialog
+// mapping before every job. Do the same here so the slot chosen in Orca is used.
+std::string QidiPrinterAgent::build_slot_mapping_gcode(const std::string& ams_mapping2, const std::string& ams_mapping)
+{
+    constexpr int boxes         = 4;
+    constexpr int slots_per_box = 4;
+    constexpr int max_slots     = boxes * slots_per_box; // T0..T15 on the printer
+
+    std::vector<int> slot_for_tool;
+
+    // Preferred: [{"ams_id":a,"slot_id":s}, ...] indexed by filament
+    auto v1 = nlohmann::json::parse(ams_mapping2, nullptr, false);
+    if (!v1.is_discarded() && v1.is_array() && !v1.empty()) {
+        for (const auto& item : v1) {
+            int slot = -1;
+            if (item.is_object() && item.contains("ams_id") && item.contains("slot_id") &&
+                item["ams_id"].is_number_integer() && item["slot_id"].is_number_integer()) {
+                const int ams_id  = item["ams_id"].get<int>();
+                const int slot_id = item["slot_id"].get<int>();
+                if (ams_id >= 0 && ams_id < boxes && slot_id >= 0 && slot_id < slots_per_box)
+                    slot = ams_id * slots_per_box + slot_id;
+            }
+            slot_for_tool.push_back(slot);
+        }
+    } else {
+        // Fallback: [tray_id, ...] indexed by filament, tray_id = ams_id * 4 + slot_id
+        auto v0 = nlohmann::json::parse(ams_mapping, nullptr, false);
+        if (v0.is_discarded() || !v0.is_array())
+            return {};
+        for (const auto& item : v0) {
+            int slot = item.is_number_integer() ? item.get<int>() : -1;
+            slot_for_tool.push_back(slot >= 0 && slot < max_slots ? slot : -1);
+        }
+    }
+
+    std::string script;
+    for (size_t tool = 0; tool < slot_for_tool.size() && tool < static_cast<size_t>(max_slots); ++tool) {
+        const int slot = slot_for_tool[tool];
+        if (slot < 0)
+            continue; // not mapped to a Box slot (unused or external spool): leave the printer's value alone
+        if (!script.empty())
+            script += "\n";
+        script += "SAVE_VARIABLE VARIABLE=value_t" + std::to_string(tool) + " VALUE='\"slot" + std::to_string(slot) + "\"'";
+    }
+    return script;
+}
+
+bool QidiPrinterAgent::prepare_print(const PrintParams& params, std::string& error)
+{
+    const std::string script = build_slot_mapping_gcode(params.ams_mapping2, params.ams_mapping);
+    if (script.empty())
+        return true;
+
+    BOOST_LOG_TRIVIAL(info) << "QidiPrinterAgent::prepare_print: applying Box slot mapping\n" << script;
+    if (!send_gcode(device_info.dev_id, script)) {
+        error = "Failed to send QIDI Box slot mapping to the printer";
+        return false;
+    }
+    return true;
+}
+
 bool QidiPrinterAgent::fetch_slot_info(const std::string&        base_url,
                                        const std::string&        api_key,
                                        const QidiFilamentDict&   dict,
